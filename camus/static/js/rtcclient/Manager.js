@@ -1,4 +1,5 @@
 import EventEmitter from './EventEmitter';
+import VideoPeer from './VideoPeer';
 import MessageHandler from './MessageHandler.js';
 import Signaler from './Signaler';
 

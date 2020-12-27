@@ -16,9 +16,9 @@ from camus.util import LoopTimer, ping_clients, reap_clients, reap_rooms
 
 @app.before_serving
 async def startup():
-    LoopTimer(10, ping_clients, message_handler=get_message_handler())
-    LoopTimer(10, reap_clients, message_handler=get_message_handler())
-    LoopTimer(10, reap_rooms)
+    LoopTimer(20, ping_clients, message_handler=get_message_handler())
+    LoopTimer(30, reap_clients, message_handler=get_message_handler())
+    LoopTimer(300, reap_rooms)
 
 
 @app.route('/')

@@ -13,7 +13,7 @@ _message_handler = None
 
 
 def get_message_handler():
-    """Retrieve the global ChatManager object."""
+    """Retrieve the global MessageHandler object."""
 
     global _message_handler
     if _message_handler is None:
@@ -22,6 +22,13 @@ def get_message_handler():
 
 
 class MessageHandler:
+    """Receives, processes, and sends messages.
+
+    Messages are received via the inbox queue and sent via an outbox queue.
+    Received messages are handled according to the destination and are either
+    forwarded to another client, broadcast to a room, or processed locally.
+    """
+
     def __init__(self):
         self._address = 'ground control'
         self.inbox = asyncio.Queue()
@@ -49,7 +56,7 @@ class MessageHandler:
             message = Message(data)
             message.sender = client_uuid
 
-            # Update timestamps for client and room
+            # Update seen & active timestamps for client and room
             client = Client.query.filter_by(uuid=client_uuid).first()
             client.seen = client.room.active = datetime.datetime.utcnow()
             db.session.commit()
@@ -61,9 +68,7 @@ class MessageHandler:
 
                 # Message to be sent to all clients in the room
                 elif message.receiver == 'room':
-                    client = Client.query.filter_by(uuid=client_uuid).first()
-                    room = client.room
-                    self.broadcast(room, message)
+                    self.broadcast(client.room, message)
 
                 # Message to another client
                 else:
@@ -74,6 +79,8 @@ class MessageHandler:
                 print('Error processing inbox: {}'.format(e))
 
     def _handle_local_message(self, message):
+        """Handle a message according to its type."""
+
         reply = Message()
         reply.sender = self._address
         reply.receiver = message.sender
@@ -90,7 +97,6 @@ class MessageHandler:
         elif message.type == 'profile':
             logging.info('got profile')
             client = Client.query.filter_by(uuid=message.sender).first()
-            room = client.room
 
             username = message.data.get('username')
             if username:
@@ -98,14 +104,15 @@ class MessageHandler:
                 db.session.commit()
 
             reply.type = 'room-info'
-            reply.data = self.room_info(message.sender)
-            self.broadcast(room, reply)
+            reply.data = self._room_info(client.room)
+            self.broadcast(client.room, reply)
             reply = None
 
         elif message.type == 'get-room-info':
             logging.info('got get-room-info')
+            client = Client.query.filter_by(uuid=message.sender).first()
             reply.type = 'room-info'
-            reply.data = self.room_info(message.sender)
+            reply.data = self._room_info(client.room)
 
         elif message.type == 'get-ice-servers':
             logging.info('got get-ice-servers')
@@ -130,8 +137,8 @@ class MessageHandler:
 
             # Broadcast updated room info to remaining clients
             reply.type = 'room-info'
-            reply.data = self.room_info(message.sender)
-            self.broadcast(room, reply)
+            reply.data = self._room_info(client.room)
+            self.broadcast(client.room, reply)
             reply = None
 
         else:
@@ -141,14 +148,11 @@ class MessageHandler:
         if reply:
             self.send(reply)
 
-    def room_info(self, client_uuid):
+    def _room_info(self, room):
         """
-        Information about the room, consisting of the room ID and a list of
+        Get information about the room, consisting of the room ID and a list of
         connected clients.
         """
-
-        client = Client.query.filter_by(uuid=client_uuid).first()
-        room = client.room
 
         clients = [{'id': client.uuid, 'username': client.name}
                    for client in room.clients]
@@ -156,6 +160,7 @@ class MessageHandler:
         return {'room_id': room.slug, 'clients': clients}
 
     def send_ping(self, receiver):
+        """Send a ping message to the given receiver."""
         ping = Message()
         ping.type = 'ping'
         ping.sender = self._address
@@ -164,12 +169,21 @@ class MessageHandler:
         self.send(ping)
 
     def send_bye(self, receiver):
+        """Send a bye message to the given receiver."""
         bye = Message()
         bye.type = 'bye'
         bye.sender = self._address
         bye.receiver = receiver
         bye.data = datetime.datetime.utcnow().timestamp()
         self.send(bye)
+
+    def broadcast_room_info(self, room):
+        """Send a room-info message to clients in the given room."""
+        info = Message()
+        info.type = 'room-info'
+        info.sender = self._address
+        info.data = self._room_info(room)
+        self.broadcast(room, info)
 
 
 class Message:
